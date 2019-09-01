@@ -30,5 +30,6 @@ Neatbash -- bash prettyprinter
   -w -- provide additional warnings about non-balance of quotes and round patenthes
  
  
-  Parameters
-  1st -- name of the file
+  Parameters:
+  
+     1st -- name of the file
