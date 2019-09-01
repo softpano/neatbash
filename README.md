@@ -5,7 +5,7 @@ Neatbash -- bash prettyprinter
   Nikolai Bezroukov, 2019
   Licensed under Perl Artistic license
   
-  NOTE: for html version see http://www.softpanorama.org/Utilities/Beautifiers/neatbash.shtml
+  NOTE: for html version of this document (and may be newer version ;-) see http://www.softpanorama.org/Utilities/Beautifiers/neatbash.shtml
   
  Pretty printer Neatbash can be called a "fuzzy" pretty-printer. If does not perform full lexical analysis (which for bash is impossible  as BASH does not have lexical level defined). Instead it relies on limited context of each like to "guess" correct nesting level.   For reasonable bash style typically found in production scripts the results are quite satisfactory. Of course, it will not work for compressed or obscured code.
  
