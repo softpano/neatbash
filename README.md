@@ -30,12 +30,15 @@ Switching formatting off and on for the set of lines. This idea is similar to HE
 Correcting nesting level if it was determined incorrectly. The directive is "#%NEST" which has three forms (more can be added if necessary ;-): 
 
 1. Set the current nesting level to specified integer 
+
  #%NEST=digit --
 
-2. Increment 
+2. Increment
+
 #%NEST--
 
-3. Decrement 
+3. Decrement
+
 #%NEST--
 
 For example, if neatbash did not recognize correctly the  point of closing of a particular control structure you can close it yourself with the directive
@@ -47,9 +50,10 @@ or
 #%NEST=0 
 
 NOTES: 
-Again, all control statement should start at the first position of the line. No leading blanks are allowed. 
 
-ATTENTION: No spaces between NEST and = pr NEAT and ++/-- are allowed.
+1. Again, all control statement should start at the first position of the line. No leading blanks are allowed. 
+
+2. ATTENTION: No spaces between NEST and = or NEAT and ++/-- are allowed.
 
 Also you can arbitrary increase and decrease indent with this directive
 
@@ -58,6 +62,7 @@ As neatbash maintains stack of control keywords it reorganize it also produces s
 For most scripts NEATBASH is able to determine that correct nesting level and proper indentation. Of course, to be successful, this approach requires a certain (very reasonable) layout of the script. the main requirement is that multiline control statements should start and end on a separate line. They can not have preceding statements on the same line. For example 
 
 a=$1; if (( $a > $b) ; then 
+
 max=a; else max=b; fi
 
 but one liners (control statements which start and end on the same line) are acceptable 
@@ -75,12 +80,18 @@ INVOCATION
        neatbash [options] [file_to_process]
 
 OPTIONS
+
   -h -- this help
+  
   -t number -- size of tab (emulated with spaces)
+  
   -f -- write formatted test into the same file, creating backup
+  
   -p -- work as a pipe
+  
   -v -- provide additional warnings about non-balance of quotes and round parenthesis 
 
 PARAMETERS
+
   1st -- name of the file to be formatted
 
