@@ -7,19 +7,21 @@ Neatbash -- bash prettyprinter
   
   NOTE: for html version of this document (and may be newer version ;-) see http://www.softpanorama.org/Utilities/Beautifiers/neatbash.shtml
   
- Pretty printer Neatbash can be called a "fuzzy" pretty-printer. If does not perform full lexical analysis (which for bash is impossible  as BASH does not have lexical level defined). Instead it relies on limited context of each like to "guess" correct nesting level.   For reasonable bash style typically found in production scripts the results are quite satisfactory. Of course, it will not work for compressed or obscured code.
+ Pretty printer Neatbash can be called a "fuzzy" pretty-printer. If does not perform full lexical analysis (which for bash is impossible  as BASH does not have lexical level defined).  Instead it relies on analysis of a limited context of each line (prefix and suffix) to "guess" correct nesting level. It does not perform any reorginization of the text other then re-indentation. 
  
-This relatively novel approach as typically prettyprinter implement full lexical analysis of the language with some elements of syntax analysis, see for example my NEATPL pretty printer (http://www.softpanorama.org/Articles/Oldies/neatpl.pdf )
+For reasonable bash style typically found in production scripts the results are quite satisfactory. Of course, it will not work for compressed or obscured code.
+ 
+This is a relatively novel approach as typically prettyprinter attempt to implement full lexical analysis of the language with some elements of syntax analysis, see for example my NEATPL pretty printer (http://www.softpanorama.org/Articles/Oldies/neatpl.pdf ) or Perl tidy. 
 
-The main advantage is that such approach allows to implement pretty capable pretty printer is less then 1K of Perl source lines. Such script are more maintainable and have less chances to "drop dead" and became abandonware after the initial author lost interests and no longer supports the script. 
+The main advantage is that such approach allows to implement pretty capable pretty printer is less then 1K of Perl source lines. Such scripts are more maintainable and have less chances to "drop dead" and became abandonware after the initial author lost interests and no longer supports the script. 
 
 Another huge advantage is the this is  very safe approach, which normally does not (and can not) introduces any errors in bash code with the exception of indented here lines which might be "re-indented" based on the current nesting.  As BASH has no defined lexical level and its parting can never be guaranteed to be  correct this is the only safe approach for such language. You can be sure that no errors are injected by the formatter into the script. 
 
-But there is no free lunch and such limited context approach means that sometimes (rarely) the nesting level can be determined incorrectly.  There also might be problem with multiline string literals including HERE literals that have non zero fixed indent that can't be changed (HERE stings with zero indent are safe) 
+But there is no free lunch, and such "limited context" approach means that sometimes (rarely) the nesting level can be determined incorrectly.  There also might be problem with multiline string literals including HERE literals that have non zero fixed indent that can't be changed (HERE stings with zero indent are safe) 
 
-To correct this situation three pseusdocomments(pragmas)  were introduced using which you can control the formatting and correct formatting errors. All pesudocomments should start at the beginning of the line. No leading spaces allowed. 
+To correct this situation three pseudo=comments(pragmas)  were introduced using which you can control the formatting and correct formatting errors. All pesudocomments should start at the beginning of the line. No leading spaces allowed. 
 
-Currently Neatbash allows three types of pseudo comments:
+Currently Neatbash allows three types of pseudo-comments:
 
 Switching formatting off and on for the set of lines. This idea is similar to HERE documents allowing to skip portions of the script which are too difficult to format correctly. One example is a here statement with indented lines when re-indenting them to the current nesting level (which is the default action of the formatter)  is undesirable. 
 
