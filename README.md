@@ -63,13 +63,13 @@ As neatbash maintains stack of control keywords it reorganize it also produces s
 
 For most scripts NEATBASH is able to determine that correct nesting level and proper indentation. Of course, to be successful, this approach requires a certain (very reasonable) layout of the script. the main requirement is that multiline control statements should start and end on a separate line. They can not have preceding statements on the same line. For example 
 
-a=$1; if (( $a > $b) ; then 
+a=$1; if (( $a > $b )) ; then 
 
-max=a; else max=b; fi
+max=$a; else max=$b; fi
 
 but one liners (control statements which start and end on the same line) are acceptable 
 
-a=$1; if (( $a > $b) ; then max=a; else max=b; fi
+a=$1; if (( $a > $b )) ; then max=$a; else max=$b; fi
 
 While any of us saw pretty perverted formatting style in some scripts this typically is an anomaly in production quality scripts and most production quality scripts display very reasonable control statements layout, the one that is expected by this pretty printer.  
 
