@@ -1,8 +1,9 @@
 Neatbash -- bash prettyprinter 
 
-  Fuzzy prettyprinter for BASH scripts: it takes into account only first and the last words in the line for formatting decisions
+  Fuzzy prettyprinter for BASH scripts
 
   Nikolai Bezroukov, 2019
+  
   Licensed under Perl Artistic license
   
   NOTE: for html version of this document (and may be newer version ;-) see http://www.softpanorama.org/Utilities/Beautifiers/neatbash.shtml
