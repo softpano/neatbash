@@ -1,17 +1,21 @@
 #!/usr/bin/perl
-#:: neatbash version 1.0 (Sep 15, 2019)
-#:: Fuzzy prettyprinter for BASH scripts: it takes into account only first and the last words (and first and the last symbols)
-#:: in the line for formatting decisions
-#:: Nikolai Bezroukov, 2019
+#:: neatbash -- Fuzzy prettyprinter for BASH scripts
+#::             it takes into account only first and the last words (and first and the last symbols)
+#::             in the line for formatting decisions
+#:: Nikolai Bezroukov, 2019-2020
 #:: Licensed under Perl Artistic license
 #::
 #:: Implements "fuzzy" formatting concept based on determining the correct nesting level using limited context at the start and the end of each line.
 #:: This allowed toimplement pretty capablepretty printer is less then 1K of Perl source lines
 #::
+#:: In addition to to providing consistent formatting it is extremely useful for funding missing '{' in complex deeply nested scripts.
+#::
 #:: To be successful, this approach requires a certain (very reasonable) layout of the script with control statement starting and ending on a separate lines.
-#:: This is standard-de-facto in formatting Unix shell scripts so for most production script this approach is successful and does not requires any twcking
-#:: using predominant -- directives that control prettyprinter operation (see below)
-#:: But of course, there are some exceptions. For example, for any script compressed to eliminate whitespace this approach  is not successful
+#:: Most production script formatting is OK  and does not requires any twicking
+#::      You can laso use directives that control prettyprinter operation (see below)
+#::
+#:: But of course, there are some exceptions. For example, for any script compressed to eliminate whitespace this approach
+#::      this apporach will fail
 #::
 #:: --- INVOCATION
 #::
@@ -68,24 +72,23 @@
 #START ===================================================================================
 #=== Start
    use v5.10;
-#  use Modern::Perl;
    use warnings;
    use strict 'subs';
    use feature 'state';
    use Getopt::Std;
 
    $debug=1; # 0-1 production mode (1 with additional diag messages); 2-9 debugging modes
-   #$debug=1;  # better diagnistics -- all messages diplaed on the console (5,5)
+   #$debug=1;  # better diagnistics -- all messages diplayed on the console (5,5)
    #$debug=2; # starting from debug=2 the results are not written to disk
    #$debug=3; # starting from Debug=3 only the first chunk processed
 
 # you can switch on tracing from particular line of source ( -1 to disable)
    $breakpoint=-1;
 
-   $VERSION='1.0';
+   $VERSION='1.1';
    $SCRIPT_NAME='neatbash';
    #$OS=$^O; # $^O is built-in Perl variable that contains OS name
-   $HOME=$ENV{'HOME'}; # $HOME/Archive is used for backups
+   $HOME=$ENV{'HOME'}; # $HOME/Archive is used for backup, if debug>0
 
    $LOG_DIR='/tmp/'.ucfirst($SCRIPT_NAME);
    %delim=('if'=>'fi','for'=>'done', 'case'=>'esac','while'=>'done','until'=>'done');
