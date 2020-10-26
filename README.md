@@ -2,7 +2,7 @@ Neatbash -- bash prettyprinter
 
   Fuzzy prettyprinter for BASH scripts
 
-  Nikolai Bezroukov, 2019
+  Copyright Nikolai Bezroukov, 2019-2020
   
   Licensed under Perl Artistic license
   
