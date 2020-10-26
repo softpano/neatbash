@@ -64,6 +64,7 @@
 # 0.8  2019/08/02  BEZROUN   Comments and lines staring with a letter in the first position are treated as immutable, theyare never shifted
 # 0.9  2019/09/03  BEZROUN   Pseudocomments for the control of the NEATBASH are implemented.
 # 1.0  2019/09/15  BEZROUN   Cleaning of the code and documentation for putting it on GitHub
+# 1.1  2010/10/26  BEZROUN   A couple of minor changes
 #START ===================================================================================
 #=== Start
    use v5.10;
@@ -78,46 +79,38 @@
    #$debug=2; # starting from debug=2 the results are not written to disk
    #$debug=3; # starting from Debug=3 only the first chunk processed
 
-# INTERESTING, VERY NEAT IDEA: you can switch on tracing from particular line of source ( -1 to disable)
+# you can switch on tracing from particular line of source ( -1 to disable)
    $breakpoint=-1;
 
    $VERSION='1.0';
    $SCRIPT_NAME='neatbash';
-   $OS=$^O; # $^O is built-in Perl variable that contains OS name
-   if($OS eq 'cygwin' ){
-      $HOME="/cygdrive/f/_Scripts";  # $HOME/Archive is used for backups
-   }elsif($OS eq 'linux' ){
-      $HOME=ENV{'HOME'}; # $HOME/Archive is used for backups
-   }
-   $LOG_DIR="/tmp/$SCRIPT_NAME";
+   #$OS=$^O; # $^O is built-in Perl variable that contains OS name
+   $HOME=$ENV{'HOME'}; # $HOME/Archive is used for backups
+
+   $LOG_DIR='/tmp/'.ucfirst($SCRIPT_NAME);
    %delim=('if'=>'fi','for'=>'done', 'case'=>'esac','while'=>'done','until'=>'done');
-
-
    $tab=3;
    $write_formatted=0; # flag that dremines if we need to write the result into the file supplied.
    $write_pipe=0;
 
-   prolog($SCRIPT_NAME,$HOME);
    if( $debug>0 ){
       logme(-1,5,5);
+      autocommit($SCRIPT_NAME,$HOME);
    } else {
       logme(-1,1,5);
    }
-   banner($LOG_DIR,$main::SCRIPT_NAME,'Bash prettyprinter',30); # Opens SYSLOG and print STDERRs banner; the last parameter is log retention period
+   banner($LOG_DIR,$SCRIPT_NAME,'Bash prettyprinter',30); # Opens SYSLOG and print STDERRs banner; the last parameter is log retention period
    get_params();
-   if( $debug==0 ){
-      print STDERR "$main::SCRIPT_NAME is working in production mode\n";
-   } else {
-      print STDERR "ATTENTION!!! $main::SCRIPT_NAME is working in debugging mode debug=$debug\n";
+   if( $debug>0 ){
+       print STDERR "ATTENTION!!! $SCRIPT_NAME is working in debugging mode debug=$debug\n";
    }
    print STDERR "=" x 80,"\n\n";
 
 #
 # Main loop initialization variables
 #
-   $new_nest=$cur_nest=0;
-   $top=0; $stack[$top]='';
-   $lineno=0;
+   $new_nest=$cur_nest=$top=$lineno=0;
+   $stack[$top]='';
    $fline=0; # line number in formatted code
    $here_delim="\n"; # impossible combination
    $noformat=0;
@@ -449,7 +442,7 @@ sub get_params
 ###================================================= NAMESPACE sp: My SP toolkit subroutines
 #
 
-sub prolog
+sub autocommit
 {
 my $SCRIPT_NAME=$_[0];
 my $SCRIPT_DIR=$_[1];
@@ -464,23 +457,24 @@ my $SCRIPT_DIR=$_[1];
 #
 my $SCRIPT_TIMESTAMP;
 my $script_delta=1;
-      if(  -f "$SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl"  ){
-         if( (-s "$SCRIPT_DIR/$main::SCRIPT_NAME.pl") == (-s "$SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl")   ){
-            `diff $SCRIPT_DIR/$main::SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl`;
+      return if ($debug==0);
+      if(  -f "$SCRIPT_DIR/Archive/$SCRIPT_NAME.pl"  ){
+         if( (-s "$SCRIPT_DIR/$SCRIPT_NAME.pl") == (-s "$SCRIPT_DIR/Archive/$SCRIPT_NAME.pl")   ){
+            `diff $SCRIPT_DIR/$SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$SCRIPT_NAME.pl`;
             if(  $? == 0  ){
                $script_delta=0;
             }
          }
          if( $script_delta > 0 ){
-            chomp($SCRIPT_TIMESTAMP=`date -r $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl +"%y%m%d_%H%M"`);
-            `mv $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.$SCRIPT_TIMESTAMP.pl`;
-            `cp -p $SCRIPT_DIR/$main::SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl `;
+            chomp($SCRIPT_TIMESTAMP=`date -r $SCRIPT_DIR/Archive/$SCRIPT_NAME.pl +"%y%m%d_%H%M"`);
+            `mv $SCRIPT_DIR/Archive/$SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$SCRIPT_NAME.$SCRIPT_TIMESTAMP.pl`;
+            `cp -p $SCRIPT_DIR/$SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$SCRIPT_NAME.pl `;
          }
       } else {
-         `cp -p $SCRIPT_DIR/$main::SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$main::SCRIPT_NAME.pl `;
+         `cp -p $SCRIPT_DIR/$SCRIPT_NAME.pl $SCRIPT_DIR/Archive/$SCRIPT_NAME.pl `;
       }
 
-} # prolog
+} # autocommit
 
 
 # Read script and extract help from comments starting with #::
@@ -536,7 +530,7 @@ my $timestamp=`date "+%y/%m/%d %H:%M"`; chomp $timestamp;
 my $day=`date '+%d'`; chomp $day;
 my $logstamp=`date +"%y%m%d_%H%M"`; chomp $logstamp;
 my $SCRIPT_MOD_DATE;
-      chomp($SCRIPT_MOD_DATE=`date -r /cygdrive/f/_Scripts/$main::SCRIPT_NAME.pl +"%y%m%d_%H%M"`);
+      chomp($SCRIPT_MOD_DATE=`date -r /cygdrive/f/_Scripts/$SCRIPT_NAME.pl +"%y%m%d_%H%M"`);
       if( -d $LOG_DIR ){
          if( 1 == $day && $LOG_RETENTION_PERIOD>0 ){
             #Note: in debugging script home dir is your home dir and the last thing you want is to clean it ;-)
@@ -545,10 +539,10 @@ my $SCRIPT_MOD_DATE;
       }else{
          `mkdir -p $LOG_DIR`;
       }
-      $LOG_FILE="$LOG_DIR/$main::SCRIPT_NAME.$logstamp.log";
+      $LOG_FILE="$LOG_DIR/$SCRIPT_NAME.$logstamp.log";
       open(SYSLOG, ">$LOG_FILE") || abend(__LINE__,"Fatal error: unable to open $LOG_FILE");
 
-      $title="\n\n".uc($main::SCRIPT_NAME).": $title. Version $main::VERSION ($SCRIPT_MOD_DATE) DEBUG=$main::debug Date $timestamp\nLogs are at $LOG_FILE. Type -h for help.\n";
+      $title="\n\n".uc($SCRIPT_NAME).": $title. Version $VERSION ($SCRIPT_MOD_DATE) DEBUG=$debug Date $timestamp\nLogs are at $LOG_FILE. Type -h for help.\n";
       out($title); # output the banner
       for( my $i=4; $i<@_; $i++) {
          out($_[$i]); # optional subtitles
@@ -583,7 +577,7 @@ state $msg_cutlevel2; # variable 5-$verbosity2
 state @ermessage_db; # accumulates messages for each caterory (warning, errors and severe errors)
 state @ercounter;
 state $delim='=' x 80;
-state $linelen=110; # max allowed line length
+state $screenwidth=110; # max allowed line length
 
 
 #
@@ -607,7 +601,7 @@ state $linelen=110; # max allowed line length
 # Now let's process "normal message, which should have severty code.
 #
 my $error_code=substr($_[1],0,1);
-my $error_suffix=(length($_[0])>1) ? substr($_[1],1,1):''; # suffix T means add timestamp
+my $error_suffix=(length($_[0])>1) ? substr($_[1],1,1) : ''; # suffix T means add timestamp
 
 
 my $severity=index("diwest",lc($error_code));
@@ -617,7 +611,7 @@ my $severity=index("diwest",lc($error_code));
 #
 # Generate diagnostic message from error code, line number and message (optionally timestamp is suffix of error code is T)
 #
-      $message="$message_prefix\-$lineno$error_code: $message";
+      $message="$message_prefix\-$error_code$lineno: $message";
       if( $error_code eq 'I' ){
          out($message);
          return;
@@ -648,16 +642,16 @@ my $severity=index("diwest",lc($error_code));
          if( $severity >= $msg_cutlevel1 ){
             # $msg_cutlevel1 defines writing to STDIN. 3 means Errors (Severe and terminal messages always whould be print STDERRed)
             if( $severity<3 ){
-               if( length($message) <$linelen ){
+               if( length($message) <$screenwidth ){
                   print STDERR "$message\n";
                } else {
-                  $split_point=rindex($message,' ',$linelen);
+                  $split_point=rindex($message,' ',$screenwidth);
                   if( $split_point>0 ){
                      print STDERR substr($message,0, $split_point);
                      print STDERR "\n   ".substr($message, $split_point)."\n";
                   } else {
-                     print STDERR substr($message,0,$linelen);
-                     print STDERR "\n   ".substr($message,$linelen)."\n";
+                     print STDERR substr($message,0,$screenwidth);
+                     print STDERR "\n   ".substr($message,$screenwidth)."\n";
                   }
                }
             } else {
