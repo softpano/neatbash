@@ -1,0 +1,716 @@
+#!/usr/bin/perl
+#:: neatbash -- Fuzzy prettyprinter for BASH scripts
+#::             it takes into account only first and the last words (and first and the last symbols)
+#::             in the line for formatting decisions
+#:: Nikolai Bezroukov, 2019-2020
+#:: Licensed under Perl Artistic license
+#::
+#:: Implements "fuzzy" formatting concept based on determining the correct nesting level using limited context at the start and the end of each line.
+#:: This allowed toimplement pretty capablepretty printer is less then 1K of Perl source lines
+#::
+#:: In addition to to providing consistent formatting it is extremely useful for funding missing '{' in complex deeply nested scripts.
+#::
+#:: To be successful, this approach requires a certain (very reasonable) layout of the script with control statement starting and ending on a separate lines.
+#:: Most production script formatting is OK  and does not requires any twicking
+#::      You can laso use directives that control prettyprinter operation (see below)
+#::
+#:: But of course, there are some exceptions. For example, for any script compressed to eliminate whitespace this approach
+#::      this apporach will fail
+#::
+#:: --- INVOCATION
+#::
+#::   neatbash [options] [file_to_process]
+#::
+#::--- OPTIONS
+#::
+#::    -h        -- this help
+#::    -t number -- size of tab (emulated with spaces)
+#::    -f        -- in place formatting of a file: write formatted text into the same files creating backup
+#::    -p        -- work as a pipe
+#::    -v        -- verbosity level
+#::                 0         -- no errors are displayed
+#::                 1 or -v   -- only "serious errors" are displayed (default)
+#::                 2 or -vv  -- only "serious errors" and "errors" are displayed
+#::                 3 or -vvv -- "serious errors", "errors" and "warnings" are displayed
+#::
+#::
+#::  PARAMETERS
+#::
+#::    1st -- name of the file
+#::
+#::    NOTE: With option -p the progrem can be used as a stage fo the pipe
+#::
+#::    cat my_script.sh | neatbash -p > my_script_formatted.sh
+#::
+#:: PSEUDOCOMMENTS (PRAGMA)
+#::
+#::    Neatbash allows three types of pseudo comments using which you can to a certain extent control the processing and correct formatting errors.
+#::
+#::    The first two are similar to HERE documents and switch formatting off
+#::    It is particularly useful in case of here statement with indented lines when re-indenting them tot he current nesting level is undesirable.
+#::        #%OFF        -- (all capitals, single line only) stops formatting, lines are not processed and put into listing and formatted code buffer intact
+#::        #%ON         -- (all capitals, single line only) resumes formatting
+#::    The third one allow to correct netting level if the neatbash screw it up:
+#::        %NEST=digit  -- set the current nesting level to specified integer
+#::    Also allowed increment and  decrements of the nest level:
+#::        %NEST=++     -- increment
+#::        %NEST--      -- decrement
+#--- Development History
+#
+# Ver      Date        Who        Modification
+# ====  ==========  ========  ==============================================================
+# 0.1  2019/08/29  BEZROUN   Initial implementation
+# 0.2  2019/08/30  BEZROUN   The ability to debug starting with particular line of input (borrowed from netperl)
+# 0.3  2019/08/30  BEZROUN   Better diagnostics based on keyword stack added
+# 0.4  2019/08/31  BEZROUN   Formatted listing redirected to STDERR. The ability to work as a pipe (via option -p)
+# 0.5  2019/08/31  BEZROUN   Warning about unbalanced symbols on the line if msglevel>3 (which means warnings are displayed)
+# 0.6  2019/08/31  BEZROUN   Reformatted text now stored in a buffer and is written only if appropriate options are activated and the final nesting level is zero
+# 0.7  2019/08/01  BEZROUN   Single back indent is now treated via offset parameter
+# 0.8  2019/08/02  BEZROUN   Comments and lines staring with a letter in the first position are treated as immutable, theyare never shifted
+# 0.9  2019/09/03  BEZROUN   Pseudocomments for the control of the NEATBASH are implemented.
+# 1.0  2019/09/15  BEZROUN   Cleaning of the code and documentation for putting it on GitHub
+# 1.1  2020/10/26  BEZROUN   A couple of minor changes
+# 1.11 2020/11/03  BEZROUN   Custom version of getops now is used. Allows to specify option by repetition
+#START ===================================================================================
+#=== Start
+   use v5.10;
+   use warnings;
+   use strict 'subs';
+   use feature 'state';
+   
+   $VERSION='1.1';
+   $debug=0; # 0-1 production mode (1 with additional diag messages); 2-9 debugging modes
+   #$debug=1;  # better diagnistics -- all messages diplayed on the console (5,5)
+   #$debug=2; # starting from debug=2 the results are not written to disk
+   #$debug=3; # starting from Debug=3 only the first chunk processed 
+   $breakpoint=-1; # you can switch on tracing from particular line of source ( -1 to disable)  
+   $SCRIPT_NAME='neatbash';
+   #$OS=$^O; # $^O is built-in Perl variable that contains OS name
+   $HOME=$ENV{'HOME'}; # $HOME/Archive is used for backup, if debug>0
+   $use_git=0;
+   $DB::single = 0;
+   
+
+   $LOG_DIR='/tmp/'.ucfirst($SCRIPT_NAME);
+   %delim=('if'=>'fi','for'=>'done', 'case'=>'esac','while'=>'done','until'=>'done');
+   $tab=3;
+   $write_formatted=0; # flag that dremines if we need to write the result into the file supplied.
+   $write_pipe=0;
+#
+# Initialization for logme
+#
+   @ermessage_db={}; # accumulates messages for each category (warning, errors and severe errors)
+   @ercounter=(0,0,0,0); 
+   logme('V',3,3); # initialize logme so that it can be used in options
+   
+   banner(ucfirst($SCRIPT_NAME)." Bash prettyprinter. Version $VERSION. ",$LOG_DIR,30); # Opens SYSLOG and print STDERRs banner; the last parameter is log retention period
+   get_params();
+   if( $debug>0 ){
+      print STDERR "ATTENTION!!! $SCRIPT_NAME is working in debugging mode debug=$debug\n";
+      logme('V',3,3);
+      autocommit($SCRIPT_NAME,$HOME.'/Archive',$use_git);
+   } else {
+      logme('V',1,3);
+   }   
+
+#
+# Main loop initialization variables
+#
+   $new_nest=$cur_nest=$top=$lineno=0;
+   $stack[$top]='';
+   $fline=0; # line number in formatted code
+   $here_delim="\n"; # impossible combination
+   $noformat=0;
+   $InfoTags='';
+#
+# MAIN LOOP
+#
+   while($line=<STDIN> ){
+      $offset=0;
+      chomp($line);
+      $intact_line=$line;
+      $lineno++;
+      if( $lineno == $breakpoint ){
+         $DB::single = 1
+      }
+      if( substr($line,-1,1) eq "\r" ){
+         chop($line);
+      }
+      # trip traling blanks, if any
+      if( $line=~/(^.*\S)\s+$/ ){
+         $line=$1;
+      }
+      #
+      # Check for HERE line
+      #
+      if( $noformat ){
+         if( $line eq $here_delim ){
+            $noformat=0;
+            $InfoTags='';
+         }
+         list_line(-1000);
+         next;
+      }
+
+      if( $line =~/<<(\w+)$/ ){
+         $here_delim=$1;
+         $noformat=1;
+         $InfoTags='DATA';
+      }
+      #
+      # check for comment lines
+      #
+      if( substr($line,0,1) eq '#' ){
+         if( $line eq '#%OFF' ){
+            $noformat=1;
+            $here_delim='#%ON';
+            $InfoTags='OFF';
+         }elsif( $line =~ /^#%ON/ ){
+            logme('S',"Misplaced #%ON directive without preceeding #%OFF");
+         }elsif( substr($line,0,6) eq '#%NEST') {
+            if( $line =~ /^#%NEST=(\d+)/) {
+               $cur_nest=$new_nest=$1; # correct current nesting level
+            }elsif( $line =~ /^#%NEST++/) {
+               $cur_nest=$new_nest=$1+1; # correct current nesting level
+            }elsif( $line =~ /^#%NEST--/) {
+               $cur_nest=$new_nest=$1+1; # correct current nesting level
+            }
+         }
+         list_line(-1000);
+         next;
+      }
+
+      # blank lines should not be processed
+      if( $line =~/^\s*$/ ){
+         list_line(-1000);
+         next;
+      }
+      # trim leading blanks
+      if( $line=~/^\s*(\S.*$)/){
+         $line=$1;
+      }
+      # comments on the level of nesting 0 should start with the first position
+
+
+      if(  substr($line,0,1) eq '#' ){
+         list_line(0);
+         next;
+      }
+      if( substr($intact_line,0,1) eq '{' || substr($line,-1,1 ) eq '{' ){
+         if( $cur_nest !=0  ){
+            logme('S',"Non zero nesting of exit from function");
+         }
+         list_line(-1);
+         $cur_nest=0;
+         next;
+      }
+      if( substr($intact_line,0,1) eq '}' && length($line)==1 ){
+         if( $cur_nest !=0  ){
+            logme('S',"Non zero nesting of exit from function");
+         }
+         $cur_nest=0; # immeduate effect
+         list_line(-1000);
+         next;
+      }
+
+      if( $line=~/(\w+)/  ){
+         $first_word=$1;
+         if( exists($delim{$first_word}) ){
+            $new_nest++;
+            $top++;
+            $stack[$top]=$first_word;
+         } elsif( $first_word eq 'fi' || $first_word eq 'done'   || $first_word eq 'esac' ){
+            $new_nest--;
+            $cur_nest=$new_nest;
+            if( $top>0 ){
+               $last_open=$stack[$top];
+               if( $delim{$last_open} ne $first_word ){
+                  logme('S',"Extended closing delimiter should be $delim{$last_open} and not $first_word");
+               }
+               $top--;
+            }else{
+               logme('S',"Attempt to close control structure on zero nesting level. Extra closing keyword $first_word ?");
+            }
+         }elsif($first_word eq 'else' || $first_word eq 'elif'|| $first_word eq 'then' || $first_word eq 'do' || $first_word eq 'esac' ){
+            list_line(-1); # immeduate one time move left
+            next;
+         }
+         if( $top>0 && $stack[$top] eq 'case' && substr($line,-1,1) eq ')' ){
+            $offset=-1;
+         }
+
+      }
+      list_line($offset);
+   } # while
+
+#
+# Epilog
+#
+   if( $cur_nest !=0 ){
+      logme('E',"Final nesting is $cur_nest instead of zero");
+      ( $write_formatted >0 || $write_pipe > 0  ) && logme('E',"Writing formatted code is blocked");
+      exit 4;
+   }
+   if( $write_formatted >0 || $write_pipe > 0  ){
+      write_formatted_code();
+   }
+   logme('X','');
+   exit 0;
+
+#
+# Subroutines
+#
+sub list_line
+{
+      my $offset=$_[0];
+
+      if( length($line)>1 && substr($line,0,1) ne '#' ){
+         check_delimiter_balance($line);
+      }
+      $prefix=sprintf('%4u %3d %4s',$lineno, $cur_nest, $InfoTags);
+      if( substr($intact_line,0,1) =~ /\S/ ){
+         $spaces='';
+      }elsif( ($cur_nest+$offset)<0 || $cur_nest<0 ){
+         $spaces='';
+      }else{
+         $spaces= ' ' x (($cur_nest+$offset+1)*$tab);
+      }
+      print STDERR "$prefix | $spaces$line\n";
+      print SYSLOG "$prefix | $spaces$line\n";
+      if(  $write_formatted > 0 ){
+         $formattted[$fline++]="$spaces$line\n";
+      }
+      $cur_nest=$new_nest;
+      if( $noformat==0) {$InfoTags=''}
+}
+sub  write_formatted_code
+{
+      if( -f $fname ){
+         chomp($timestamp=`date +"%y%m%d_%H%M"`);
+         $fname_backup=$fname.'.'.$timestamp;
+         `cp -p $fname $fname_backup`;
+         if( $? > 0  ){
+            abend("Unable to create a backup");
+         }
+      }
+      if( $write_formatted ){
+         open (SYSFORM,'>',"$fname.neat") || abend("Cannot open file $fname.neat for writing");
+         print SYSFORM @formattted;
+         close SYSFORM;
+         `bash -n $fname.neat`;
+         if(  $? > 0 ){
+            logme('E',"Checking reformatted code via bash -n produced some errors (RC=$?). The original file left intact. Reformatted file is $fname.neat");
+         } else {
+            close STDIN;
+            `mv $fname.neat $fname`;
+         }
+      }elsif( $write_pipe ){
+         print @formattted;
+      }
+}
+#
+# Check delimiters balance without lexical parcing of the string
+#
+sub check_delimiter_balance
+{
+my $i;
+my $scan_text=$_[0];
+      $sq_br=0;
+      $round_br=0;
+      $curve_br=0;
+      $single_quote=0;
+      $double_quote=0;
+      return if( length($_[0])==1 || $line=~/.\s*#/); # no balance in one symbol line.
+      for( $i=0; $i<length($scan_text); $i++ ){
+         $s=substr($scan_text,$i,1);
+         if( index(q|{}[]()'"|,$s) >-1 ){
+            if( $s eq '{' ){
+               $curve_br++;
+            }elsif( $s eq '}' ){
+               $curve_br--;
+            }elsif( $s eq '(' ){
+               $round_br++;
+            }elsif( $s eq ')' ){
+               $round_br--;
+            }elsif( $s eq '[' ){
+               $sq_br++;
+            }elsif( $s eq ']' ){
+               $sq_br--;
+            }elsif( $s eq "'"  ){
+               $single_quote++;
+            }elsif($s eq '"'  ){
+               $double_quote++;
+            }
+         }
+      }
+      if(  $single_quote%2==1  ){ $InfoTags.="'";}
+      elsif(  $double_quote%2==1  ){  $InfoTags.='"'; }
+
+      if( $single_quote%2==0 && $double_quote%2==0 ){
+
+         if( $curve_br>0 ){
+            $InfoTags ='{';
+            ( $single_quote==0 && $double_quote==0 ) && logme('W',"Possible missing '}' on the following line:");
+         } elsif(  $curve_br<0  ){
+            $InfoTags ='}';
+            ( $single_quote==0 && $double_quote==0 ) && logme('W',"Possible missing '{' on the following line:  ");
+         }
+
+         if(  $round_br>0 ){
+            $InfoTags ='(';
+            ( $single_quote==0 && $double_quote==0 ) && logme('W',"Possible missing ')' on the following line:");
+         } elsif(  $round_br<0  ){
+            $InfoTags =')';
+            if( $stack[$top] eq 'case' && $round_br == -1  ){
+               # regex line
+            } else {
+               ( $single_quote==0 && $double_quote==0 ) && logme('W',"Possible missing '(' on the following line:");
+            }
+         }
+
+         if(  $sq_br>0  ){
+            $InfoTags ='[';
+            ( $single_quote==0 && $double_quote==0 ) &&logme('W',"Possible missing ']' on the following line:");
+         } elsif(  $sq_br<0  ){
+            $InfoTags =']';
+            ( $single_quote==0 && $double_quote==0 ) && logme('W',"Possible missing '[' on the following line:");
+         }
+      }
+
+}
+
+#
+# process parameters and options
+#
+
+sub get_params
+{
+
+      getopts("fhb:t:v:d:",\%options);
+      if(  exists $options{'v'} ){
+         if( $options{'v'} =~/\d/ && $options{'v'}<5  ){
+            logme('V',$options{'v'},5);
+         }else{
+            logme('V',3,5); # add warnings
+         }
+      }
+      if(  exists $options{'h'} ){
+         helpme();
+      }
+      if(  exists $options{'p'}  ){
+         $write_formatted=0;
+         $write_pipe=1;
+      }
+      if(  exists $options{'f'}  ){
+         $write_formatted=1;
+      }
+      if(  exists $options{'t'}  ){
+         if( $options{'t'}>0  && $options{'t'}<10 ){
+            $tab=$options{'t'};
+         } else {
+            die("Wrong value of option -t (tab size): $options('t')\n");
+         }
+      }
+      if(  exists $options{'b'}  ){
+         if( $options{'b'}>0  && $options{'t'}<1000 ){
+            $breakpoint=$options{'b'};
+         } else {
+            die("Wrong value of option -b (line for debugger breakpoint): $options('b')\n");
+         }
+      }
+      if(  exists $options{'d'}  ){
+         if( $debug =~/\d/ ){
+            $debug=$options{'d'};
+         }elsif( $options{'d'} eq '' ){
+            $debug=1;
+         }else{
+            die("Wrong value of option -d: $options('d')\n");
+         }
+      }
+
+      if( scalar(@ARGV)==0 ){
+         open (STDIN, ">-");
+         $write_formatted=0;
+         return;
+      }
+
+      if( scalar(@ARGV)==1 ){
+         $fname=$ARGV[0];
+         unless( -f $fname ){
+            die ("Unable to open file $ARGV[0]");
+         }
+         open (STDIN, "<$fname");
+      } else {
+         $args=join(' ', @ARGV);
+         die ("Too many arguments: $args")
+      }
+
+} #get_params
+#
+###================================================= NAMESPACE sp: My SP toolkit subroutines
+#
+#
+# softpano.pm -- Set of standard softpanorama subroutines
+#
+sub autocommit
+{
+# parameters
+my ($archive_dir,$use_git)=@_; #Script name can be with ewxprentionpl or without. 
+#
+#  Local vars
+#
+my $build_timestamp;
+my $script_delta=1;
+my $file=( ($last=index($0,'/'))>-1 ) ? substr($0,$last+1):$0;
+      ( ! -d $archive_dir ) && `mkdir -p $archive_dir`;
+      if(  -f "$archive_dir/$file"  ){
+         if( (-s $0 ) == (-s "$archive_dir/$file")   ){
+            `diff $0 $archive_dir/$file`;
+            $script_delta=( $? == 0 )? 0: 1;
+         }
+         if( $script_delta ){
+            chomp($build_timestamp=`date -r $archive_dir/$file +"%y%m%d_%H%M"`);
+            `mv $archive_dir/$file $archive_dir/$file.$build_timestamp`;
+         }
+      }
+      if(  $script_delta){
+         `cp -p $0 $archive_dir/$file`;
+          ($use_git) && `cd $archive_dir && git commit $archive_dir/$file`; # autocommit
+      }
+} # autocommit
+sub get_config
+{
+my $config_file=$_[0];
+my @conf=`cat $config_file`;
+my ($line,$i);
+   for( $i=1; $i<@conf; $i++ ){
+      chomp($line=$conf[$i]);
+      if( substr($line,0,1) eq '#' ){
+         $conf[$i]='';
+         next;
+      }
+      if( $line eq '' || $line=~/^\s*$/ ){
+         $conf[$i]=''; # emply line
+         next;
+      }
+      if( $line=~/^\s*(.*\S)\s*$/ ){
+         $line=$1;
+      }
+      if( $line=~/^(\w+)\s*=\s*['"](.*?)['"]/ ){
+         if( $2=~tr/'"// ){
+            die(qq(Wrong value $1 in line $i of config file $config_file -- string parameter can't contain ' or "" within its value.));
+         }
+         $conf[$i]='$'."$1='$2'";
+      }elsif( $line=~/^(\w+\s*=\s*\d+)/ ){
+         $conf[$i]='$'."$1";
+      }else{
+         print "Line $i ($line) in config file $config_file  is not recognizable configuration statement and was skipped\n";
+      }
+   }
+   if( $debug ){
+      print join("\n",@conf),"\n";
+   }
+   for( $i=1; $i<@conf; $i++ ){
+      next unless($conf[$i]);
+      eval($conf[$i]);
+   }
+   return 0;
+} # get_config
+sub standard_options
+{
+   helpme() if exists $options{'h'};
+   if( exists($options{'d'}) ){
+      if( $options{'d'} =~/^(\d)\:(.*)$/ ){
+         $debug=$1;
+         $breakpoint=$2;
+      }elsif( $options{'d'}=~/\d/ ){
+         $debug=$options{'d'};
+      }else{
+         die("Wrong value of option -d ($options{'d'}).Should be iether single digit of digit and test user like -d '2:frankj'\n\n");
+      }   
+   }    
+  
+   if( exists $options{'v'} ){
+      if(  $options{'v'}>=0 && $options{'v'}<=3){
+         logme('V',$options{'v'},$options{'v'});
+      }else{
+         logme('E','The value of option v (number of parallel transfers) is outside the range 0..3. 3 assumed');
+         logme('V',3,3);
+      }
+   }
+
+   if(  exists  $options{'c'}  ){
+      $config_file=$options{'c'};
+      if( -f $config_file && -r $config_file ){
+         get_config($config_file);
+      }else{
+         abend("Config file $config_file does not exists, or does not have read permissions for the user\n\n");
+      }
+   }
+}
+
+sub logme
+# logme: Standard SP package diagnostic messages generator. Version 2.8 (Nov 1, 2020)
+{
+my ($package, $filename, $lineno) = caller;
+# two special types messages 'V' -- set verbosity and 'X' print summary. 
+   if( $_[0] eq 'V' ){
+      # set verbosity NOTE: Call logme('V') simply prints the content of the buffer. Useful in processing of options for defering messages until LOR_DIR is set. 
+      $min_msglevel1=length("WEST")-$_[1]-1; # verbosity 3 is max and means cut level 0 (s 4-3-1=0 ) -- the index corresponding to code 'W'
+      $min_msglevel2=length("WEST")-$_[2]-1; # same for log only (like in MSGLEVEL in mainframes ;-)
+      return;
+   }elsif( $_[0] eq 'X' ){
+      my $summary=''; # string which contains stat of how many  messages of each type were generated (including supressed).       
+      for( my $i=0; $i<=length('WEST'); $i++ ){
+         next unless( $ercounter[$i] );
+         $summary.=" ".substr('WEST',$i,1).": ".$ercounter[$i];
+      } # for
+      ( scalar(@_)>1 ) && out($_[1],"\n\n=== MESSAGES SUMMARY $summary ===\n");
+      if( $ercounter[1] + $ercounter[2] ){
+         out("$ermessage_db[1]\n") if $ercounter[1]>0; # reproduce all errors
+         out("$ermessage_db[2]\n") if $ercounter[2]>0; # reproduce all severe errors 
+      }
+      return;
+   } #if
+#
+# Now let's process "normal message", which should have W,E,S, or T severity code.
+#
+my $ercode=uc(substr($_[0],0,1)); # Parameter 1 -- message code. It can be several letters long, not only a single letter
+# my $ersuffix=(length($_[0])>1) ? substr($_[0],1,1):''; # suffix of error code currently is unused. 
+chomp( my $message=$_[1]); #Parameter 2 -- text of the message (see ercode -- Parameter 1 prcessed below) 
+     $message="$SCRIPT_NAME\-$lineno$ercode: $message"; # Form diagnostic message with error code, line number and the text of the message
+my   $severity=index("WEST",$ercode);
+     if( $severity==-1){
+         out($message); # informational 'I' messages and messages with wrong error code. 
+         return;
+     }
+     $ercounter[$severity]++; # Increase messages counter for given severity (supressed by verbosity setting messages are counted too)
+     return if(  $severity<$min_msglevel1 && $severity<$min_msglevel2 ); # no need to process if this is lower then both msglevels
+#----------------- Error history -------------------------
+      if( $severity > 0 ){ $ermessage_db[$severity] .= "\n\n$message";} # this DB actually can serve as a buffer during processing of options
+#--------- Message printing and logging --------------
+      # We treat separatly verbosity for log and console.
+      # Out of four legit error codes W,E,S and T, only T is unsupressable         
+      # $min_msglevel2 defines writing to SYSLOG. 3 (default) means all (Warning, Errors and Severe errors) to be printed
+      if( $severity==2 ){
+          $message=("=" x length($message))."\n".$message."\n".("=" x length($message))."\n";
+      }    
+      ($severity >= $min_msglevel1) && print STDERR "$message\n"; # warnings and errors
+      ($severity >= $min_msglevel2) && print SYSLOG "$message\n";
+ } # logme
+
+sub out
+#direct output of lines suppled as parameters
+#Unlike logme it can accept multipile lines. Use out('') for spaceline.
+{
+   for( my $i=0; $i<@_; $i++ ){
+      print STDERR "$_[$i]\n";
+      print SYSLOG "$_[$i]\n";
+   }
+} # out
+
+sub abend
+#print diagnostic and terminate the script
+{
+my $message;
+my ($package, $filename, $lineno) = caller;
+   $message="$SCRIPT_NAME-T$lineno $_[0]. Exiting...\n\n";
+   out($message); # Syslog might not be available but STDERR always is 
+   exit 255;
+} # abend
+
+sub banner {
+#print banner and clean LOG_DIR
+my $title=$_[0]; 
+my $LOG_DIR=$_[1];
+my $LOG_RETENTION_PERIOD=$_[2];
+my $rc=( -d $LOG_DIR ) ? `find $LOG_DIR -name "*.log" -type f -mtime +$LOG_RETENTION_PERIOD -delete` : mkdir($LOG_DIR,700) ; # cleanup
+   chomp(my $timestamp=`date +"%y%m%d_%H%M"`);
+   $LOG_FILE="$LOG_DIR/$SCRIPT_NAME.$timestamp.log";
+   open(SYSLOG,'>',$LOG_FILE) || die("Fatal error: unable to open $LOG_FILE");
+   chomp($timestamp=`date "+%y/%m/%d %H:%M"`);   
+   chomp( my $BUILD_DATE=`date -r $0 +"%y%m%d_%H%M"`);
+   $title.="( Build $BUILD_DATE ). Date: $timestamp";
+   out('',$title,"Logs are at $LOG_FILE. Type -h for help.",('=' x length($title)),'');  
+}
+
+sub mkdirs
+# sub mkdirs: create multiple directories using option -p
+{
+   foreach( @_ ){
+      next if(  -d $_);
+      system("mkdir -p $_");
+      abend("Can't create directory $_") unless ( -d $_ );
+   }
+}
+sub helpme
+{
+   open(SYSHELP,'<',$0);
+   while($line=<SYSHELP>) {
+      if ( substr($line,0,3) eq "#::" ) {
+         print substr($line,3);
+      }
+   } # for
+   close SYSHELP;
+ 
+}
+sub getopts
+{
+my ($options_def,$options_hash)=@_;
+my ($first,$rest,$pos,$cur_opt);
+   while(@ARGV){
+      $cur_opt=$ARGV[0];
+      last if( substr($cur_opt,0,1) ne '-' );
+      if(  $cur_opt eq '--'){
+          shift @ARGV;
+          last;
+      }
+      $first=substr($cur_opt,1,1);
+      $pos = index($options_def,$first);
+      if( $pos==-1){
+         warn("Undefined option -$first skipped without processing\n");
+         shift(@ARGV);
+         next;
+      }
+      $rest=substr($cur_opt,2);
+      if( $pos<length($options_def)-1 && substr($options_def,$pos+1,1) eq ':' ){
+         # option with parameters
+         if( $rest eq ''){
+           shift(@ARGV); # get the value of option
+           unless( @ARGV ){
+              warn("End of line reached for option -$first which requires argument\n");
+              $$options_hash{$first}='';
+              last;
+           }
+           if(   $ARGV[0] =~/^-/ ){
+               warn("Option -$first requires argument\n");
+               $$options_hash{$first} = '';
+           }else{
+               $$options_hash{$first}=$ARGV[0];
+               shift(@ARGV); # get next chunk
+           }
+         }else{
+            #value is concatenated with option like -ddd
+            if( ($first x length($rest)) eq $rest ){
+               $$options_hash{$first} = length($rest)+1;
+            }else{
+               $$options_hash{$first}=$rest;
+            }
+            shift(@ARGV);
+         }
+      }else {
+         $$options_hash{$first} = 1; # set the option
+         if(  $rest eq ''){
+            shift(@ARGV);
+         }else{
+            $ARGV[0] = "-$rest"; # there can be other options without arguments after the first
+         }
+      }
+   }
+}
+
+sub step
+{
+   $DB::single = 1;
+}
+__DATA__
